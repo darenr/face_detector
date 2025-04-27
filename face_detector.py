@@ -7,25 +7,14 @@ It can detect faces in both images and video streams, with optimized performance
 and reduced false positives.
 """
 
-import os
 import time
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import Dict, List, Optional, Tuple, Any
 import cv2
 import numpy as np
 import torch
-from facenet_pytorch import MTCNN, InceptionResnetV1
+import sys
+from facenet_pytorch import MTCNN
 from loguru import logger
-
-# Configure logger
-logger.remove()
-logger.add(
-    "face_detector.log",
-    rotation="10 MB",
-    retention="1 week",
-    level="INFO",
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
-)
-logger.add(lambda msg: print(msg), level="INFO", format="{message}")
 
 
 class FaceDetectorApp:
@@ -58,9 +47,7 @@ class FaceDetectorApp:
             post_process: Whether to apply post-processing to bounding boxes
             margin: Margin to add around detected faces (in pixels)
         """
-        logger.info(
-            f"Initializing FaceDetectorApp with min_confidence: {min_confidence}"
-        )
+        logger.info(f"Initializing FaceDetectorApp with min_confidence: {min_confidence}")
 
         self.min_face_size = min_face_size
         self.min_confidence = min_confidence
@@ -90,12 +77,14 @@ class FaceDetectorApp:
     def _initialize_detector(self) -> None:
         """Initialize the PyTorch-based face detector."""
         try:
-            logger.info("Loading MTCNN face detector model")
+            logger.info(
+                f"Loading MTCNN face detector model with min_face_size: {self.min_face_size}"
+            )
             self.detector = MTCNN(
                 image_size=160,
                 margin=self.margin,
                 min_face_size=self.min_face_size,
-                thresholds=[0.6, 0.7, 0.8],  # MTCNN thresholds for the cascade stages
+                thresholds=[0.5, 0.6, 0.7],  # Lower thresholds to detect more faces
                 factor=0.709,  # Scale factor for image pyramid
                 post_process=self.post_process,
                 device=self.device,

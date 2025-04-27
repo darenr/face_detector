@@ -7,27 +7,27 @@ allowing users to detect faces in both uploaded images and webcam streams.
 """
 
 import glob
-import os
 import time
-import tempfile
-from typing import Dict, List, Tuple, Any, Optional, Union
+from typing import Dict, List, Tuple, Any, Optional
 
 import cv2
 import numpy as np
 import torch
+import sys
 import gradio as gr
 from loguru import logger
 
 from face_detector import FaceDetectorApp
 
-# Configure logger
-logger.remove()
+
+# add logger to stderr
 logger.add(
-    "gradio_app.log",
-    rotation="10 MB",
-    retention="1 week",
+    sys.stderr,
     level="INFO",
     format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+    colorize=True,
+    backtrace=True,
+    diagnose=True,
 )
 
 
@@ -85,12 +85,8 @@ class FaceDetectorGradioApp:
         """Build the Gradio interface with tabs for image and webcam."""
         with gr.Blocks(theme=self.theme, title="Face Detector") as interface:
             gr.Markdown("# Face Detector Application")
-            gr.Markdown(
-                "Detect faces in images or webcam streams using PyTorch. "
-                "The application returns bounding boxes as percentages of the original image."
-            )
 
-            with gr.Tabs() as tabs:
+            with gr.Tabs() as tabs:  # noqa: F841
                 # Image tab
                 with gr.Tab("Image Upload"):
                     with gr.Row():
@@ -114,15 +110,11 @@ class FaceDetectorGradioApp:
                                     label="Confidence Threshold",
                                 )
 
-                            image_detect_btn = gr.Button(
-                                "Detect Faces", variant="primary"
-                            )
+                            image_detect_btn = gr.Button("Detect Faces", variant="primary")
 
                         with gr.Column(scale=1):
                             # Output for image
-                            image_output = gr.Image(
-                                type="numpy", label="Detection Result"
-                            )
+                            image_output = gr.Image(type="numpy", label="Detection Result")
                             image_json = gr.JSON(label="Detection Details")
                             image_stats = gr.Textbox(label="Performance Stats")
 
@@ -156,9 +148,7 @@ class FaceDetectorGradioApp:
 
                         with gr.Column(scale=1):
                             # Output for webcam
-                            webcam_output = gr.Image(
-                                type="numpy", label="Detection Result"
-                            )
+                            webcam_output = gr.Image(type="numpy", label="Detection Result")
                             webcam_json = gr.JSON(label="Detection Details")
                             webcam_stats = gr.Textbox(label="Performance Stats")
 
@@ -183,9 +173,12 @@ class FaceDetectorGradioApp:
                 outputs=[webcam_output, webcam_json, webcam_stats],
             )
 
+            example_images = glob.glob("examples/*.jpg")
+            logger.info(f"Found {len(example_images)} example images")
+
             # Examples for image tab
             gr.Examples(
-                examples=glob.glob("examples/*.jpg"),
+                examples=example_images,
                 inputs=image_input,
                 outputs=[image_output, image_json, image_stats],
                 fn=lambda x: self.process_image(
@@ -243,6 +236,9 @@ class FaceDetectorGradioApp:
         """
         if image is None:
             return None, [], "No image provided"
+
+        # Log image information for debugging
+        logger.info(f"Received image: shape={image.shape}, dtype={image.dtype}")
 
         # Update detector settings if changed
         if (
@@ -305,6 +301,9 @@ class FaceDetectorGradioApp:
         if frame is None:
             return None, [], "No frame provided"
 
+        # Log frame information for debugging
+        logger.info(f"Received webcam frame: shape={frame.shape}, dtype={frame.dtype}")
+
         # Update detector settings if changed
         if (
             min_face_size != self.detector.min_face_size
@@ -313,16 +312,21 @@ class FaceDetectorGradioApp:
             self.update_detector_settings(min_face_size, confidence, False)
 
         try:
-            # Convert RGB to BGR (OpenCV expects BGR format)
+            # Ensuring correct color format for face detection
+            # Gradio webcam gives RGB format, we need to convert to BGR for OpenCV processing
             if len(frame.shape) == 3 and frame.shape[2] == 3:
                 frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                logger.info("Converted webcam frame from RGB to BGR")
             else:
                 frame_bgr = frame
+                logger.info("Using webcam frame as is (not RGB)")
 
             # Detect faces
             start_time = time.time()
             faces = self.detector.detect_faces(frame_bgr)
             detection_time = (time.time() - start_time) * 1000  # ms
+
+            logger.info(f"Face detection results: Found {len(faces)} faces")
 
             # Draw faces on frame
             result_bgr = self.detector.draw_faces(
@@ -330,7 +334,7 @@ class FaceDetectorGradioApp:
                 faces,
             )
 
-            # Convert back to RGB for display
+            # Convert back to RGB for display in Gradio
             result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
 
             # Prepare performance stats
@@ -341,6 +345,7 @@ class FaceDetectorGradioApp:
 
         except Exception as e:
             logger.error(f"Error processing webcam frame: {str(e)}")
+            logger.exception("Stack trace:")
             return frame, [], f"Error: {str(e)}"
 
     def launch(
