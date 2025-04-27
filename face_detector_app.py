@@ -125,9 +125,10 @@ class FaceDetectorGradioApp:
                             # Input controls for webcam
                             webcam_input = gr.Image(
                                 type="numpy",
-                                sources=["webcam"],
-                                streaming=True,
+                                sources="webcam",
+                                streaming=True,  # Changed from True to False for more reliable frame capture
                                 label="Webcam Feed",
+                                mirror_webcam=True,  # Mirror the webcam for a more natural experience
                             )
 
                             with gr.Row():
@@ -146,6 +147,17 @@ class FaceDetectorGradioApp:
                                     label="Confidence Threshold",
                                 )
 
+                            # Add a button to process webcam frames
+                            webcam_detect_btn = gr.Button("Process Frame", variant="primary")
+
+                            # Add instructions for webcam usage
+                            gr.Markdown("""
+                            ### Instructions:
+                            1. Allow camera access when prompted
+                            2. Take a snapshot with the webcam button
+                            3. Click 'Process Frame' to detect faces
+                            """)
+
                         with gr.Column(scale=1):
                             # Output for webcam
                             webcam_output = gr.Image(type="numpy", label="Detection Result")
@@ -163,7 +175,8 @@ class FaceDetectorGradioApp:
                 outputs=[image_output, image_json, image_stats],
             )
 
-            webcam_input.change(
+            # Replace webcam_input.change with webcam_detect_btn.click
+            webcam_detect_btn.click(
                 fn=self.process_webcam_frame,
                 inputs=[
                     webcam_input,
@@ -299,6 +312,7 @@ class FaceDetectorGradioApp:
                 - Performance statistics text
         """
         if frame is None:
+            logger.error("Webcam frame is None. Check webcam connection.")
             return None, [], "No frame provided"
 
         # Log frame information for debugging
@@ -309,7 +323,10 @@ class FaceDetectorGradioApp:
             min_face_size != self.detector.min_face_size
             or confidence != self.detector.min_confidence
         ):
-            self.update_detector_settings(min_face_size, confidence, False)
+            # Use lower confidence threshold for webcam
+            webcam_confidence = max(0.3, confidence - 0.2)
+            self.update_detector_settings(min_face_size, webcam_confidence, False)
+            logger.info(f"Lowered confidence threshold for webcam to {webcam_confidence}")
 
         try:
             # Ensuring correct color format for face detection
@@ -321,14 +338,43 @@ class FaceDetectorGradioApp:
                 frame_bgr = frame
                 logger.info("Using webcam frame as is (not RGB)")
 
-            # Detect faces
+            # Apply preprocessing to enhance face detection for webcam
+            # 1. Resize if the image is too large (better performance, sometimes better detection)
+            height, width = frame_bgr.shape[:2]
+            max_dimension = 640  # Maximum dimension for processing
+
+            if max(height, width) > max_dimension:
+                scale = max_dimension / max(height, width)
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                frame_bgr = cv2.resize(frame_bgr, (new_width, new_height))
+                logger.info(f"Resized webcam frame to {new_width}x{new_height}")
+
+            # 2. Apply histogram equalization to improve contrast
+            if len(frame_bgr.shape) == 3:
+                # Convert to YUV and equalize the Y channel
+                frame_yuv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2YUV)
+                frame_yuv[:, :, 0] = cv2.equalizeHist(frame_yuv[:, :, 0])
+                frame_bgr_eq = cv2.cvtColor(frame_yuv, cv2.COLOR_YUV2BGR)
+                logger.info("Applied histogram equalization")
+            else:
+                frame_bgr_eq = frame_bgr
+
+            # Keep both original and enhanced versions
+            # Try detection on enhanced version first
             start_time = time.time()
-            faces = self.detector.detect_faces(frame_bgr)
+            faces = self.detector.detect_faces(frame_bgr_eq)
+
+            # If no faces detected in enhanced version, try original
+            if len(faces) == 0:
+                logger.info("No faces detected in enhanced frame, trying original frame")
+                faces = self.detector.detect_faces(frame_bgr)
+
             detection_time = (time.time() - start_time) * 1000  # ms
 
             logger.info(f"Face detection results: Found {len(faces)} faces")
 
-            # Draw faces on frame
+            # Draw faces on original frame (not the equalized one for better appearance)
             result_bgr = self.detector.draw_faces(
                 frame_bgr,
                 faces,

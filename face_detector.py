@@ -12,7 +12,6 @@ from typing import Dict, List, Optional, Tuple, Any
 import cv2
 import numpy as np
 import torch
-import sys
 from facenet_pytorch import MTCNN
 from loguru import logger
 
@@ -84,8 +83,8 @@ class FaceDetectorApp:
                 image_size=160,
                 margin=self.margin,
                 min_face_size=self.min_face_size,
-                thresholds=[0.5, 0.6, 0.7],  # Lower thresholds to detect more faces
-                factor=0.709,  # Scale factor for image pyramid
+                thresholds=[0.3, 0.4, 0.5],  # Much lower thresholds to detect more faces
+                factor=0.85,  # Higher factor for denser image pyramid (better detection)
                 post_process=self.post_process,
                 device=self.device,
                 keep_all=self.keep_all,
